@@ -1,0 +1,60 @@
+name: Rollback Deployment
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to rollback (staging or production)'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+        - staging
+        - production
+      image_tag:
+        description: 'Image tag to rollback to'
+        required: true
+        type: string
+
+jobs:
+  rollback:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: us-east-1
+
+    - name: Update ECS service with rollback image
+      run: |
+        CLUSTER_NAME="shopxperience-${{ inputs.environment }}"
+        SERVICE_NAME="shopxperience-service"
+        ECR_REGISTRY=$(aws sts get-caller-identity --query Account --output text).dkr.ecr.us-east-1.amazonaws.com
+
+        # Get current task definition
+        CURRENT_TASK_DEF=$(aws ecs describe-services --cluster $CLUSTER_NAME --services $SERVICE_NAME --query 'services[0].taskDefinition' --output text)
+        aws ecs describe-task-definition --task-definition $CURRENT_TASK_DEF --query 'taskDefinition' > task-def.json
+
+        # Update image URIs in task definition
+        jq --arg backend_image "$ECR_REGISTRY/shopxperience-backend:${{ inputs.image_tag }}" \
+           --arg frontend_image "$ECR_REGISTRY/shopxperience-frontend:${{ inputs.image_tag }}" \
+           '.containerDefinitions[0].image = $backend_image | .containerDefinitions[1].image = $frontend_image' \
+           task-def.json > updated-task-def.json
+
+        # Register new task definition
+        NEW_TASK_DEF=$(aws ecs register-task-definition --cli-input-json file://updated-task-def.json --query 'taskDefinition.taskDefinitionArn' --output text)
+
+        # Update service
+        aws ecs update-service --cluster $CLUSTER_NAME --service $SERVICE_NAME --task-definition $NEW_TASK_DEF --force-new-deployment
+
+        # Wait for deployment
+        aws ecs wait services-stable --cluster $CLUSTER_NAME --services $SERVICE_NAME
+
+        echo "Rollback to ${{ inputs.image_tag }} completed successfully"

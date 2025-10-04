@@ -1,0 +1,100 @@
+config:
+  target: 'http://localhost:3000'
+  phases:
+    - duration: 60
+      arrivalRate: 5
+      name: "Warm up phase"
+    - duration: 120
+      arrivalRate: 20
+      name: "Load phase"
+    - duration: 60
+      arrivalRate: 50
+      name: "Stress phase"
+    - duration: 30
+      arrivalRate: 100
+      name: "Peak load phase"
+  defaults:
+    headers:
+      x-tenant-id: '1'
+      Authorization: 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.test_token'
+  processor: "./performance/processor.js"
+
+scenarios:
+  - name: "Authentication flow"
+    weight: 10
+    flow:
+      - post:
+          url: "/api/auth/login"
+          json:
+            username: "testuser"
+            password: "testpass123"
+          capture:
+            json: "$.token"
+            as: "auth_token"
+      - get:
+          url: "/api/products"
+          headers:
+            Authorization: "Bearer {{ auth_token }}"
+
+  - name: "Product browsing"
+    weight: 30
+    flow:
+      - get:
+          url: "/api/products?page={{ $randomInt(1, 10) }}&limit=10"
+      - get:
+          url: "/api/products/{{ $randomInt(1, 100) }}"
+
+  - name: "Customer management"
+    weight: 15
+    flow:
+      - get:
+          url: "/api/customers?page={{ $randomInt(1, 5) }}&limit=10"
+      - post:
+          url: "/api/customers"
+          json:
+            first_name: "LoadTest{{ $randomInt(1, 1000) }}"
+            last_name: "User{{ $randomInt(1, 1000) }}"
+            email: "loadtest{{ $randomInt(1, 1000) }}@example.com"
+            phone: "+1234567890"
+
+  - name: "Transaction processing"
+    weight: 25
+    flow:
+      - post:
+          url: "/api/transactions"
+          json:
+            customer_id: "{{ $randomInt(1, 50) }}"
+            items:
+              - product_id: "{{ $randomInt(1, 100) }}"
+                quantity: "{{ $randomInt(1, 5) }}"
+            payment_method: "cash"
+      - get:
+          url: "/api/transactions?page={{ $randomInt(1, 10) }}&limit=10"
+
+  - name: "Inventory operations"
+    weight: 10
+    flow:
+      - get:
+          url: "/api/inventory?location_id={{ $randomInt(1, 5) }}"
+      - put:
+          url: "/api/inventory/{{ $randomInt(1, 200) }}"
+          json:
+            quantity: "{{ $randomInt(10, 100) }}"
+
+  - name: "Reports generation"
+    weight: 5
+    flow:
+      - get:
+          url: "/api/reports/sales?start_date=2024-01-01&end_date=2024-12-31"
+      - get:
+          url: "/api/reports/inventory?location_id={{ $randomInt(1, 5) }}"
+
+  - name: "Mixed operations"
+    weight: 5
+    flow:
+      - get:
+          url: "/api/products?search=laptop"
+      - get:
+          url: "/api/customers?search=john"
+      - get:
+          url: "/api/transactions?status=completed"

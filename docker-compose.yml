@@ -1,0 +1,66 @@
+version: '3.8'
+
+services:
+  db:
+    build: ./database
+    container_name: shopxperience-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: shopxperience
+      POSTGRES_USER: shopuser
+      POSTGRES_PASSWORD: shoppass
+    ports:
+      - "5432:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shopuser -d shopxperience"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  backend:
+    build: ./backend
+    container_name: shopxperience-backend
+    restart: unless-stopped
+    environment:
+      NODE_ENV: development
+      PORT: 3000
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: shopxperience
+      DB_USER: shopuser
+      DB_PASSWORD: shoppass
+      CORS_ORIGIN: http://localhost:3001
+      JWT_SECRET: your-jwt-secret-key
+      STRIPE_SECRET_KEY: your-stripe-secret-key
+    ports:
+      - "3000:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+      - /app/node_modules
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  frontend:
+    build: ./frontend
+    container_name: shopxperience-frontend
+    restart: unless-stopped
+    environment:
+      REACT_APP_API_BASE_URL: http://localhost:3000/api
+    ports:
+      - "3001:80"
+    depends_on:
+      - backend
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+
+volumes:
+  db_data:
